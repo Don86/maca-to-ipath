@@ -1,0 +1,197 @@
+library("MetaboAnalystR")
+library("KEGGREST")
+library("tidyverse")
+library("httr")
+library("RColorBrewer")
+library("XML")
+library("methods")
+library("rvest")
+library("data.table")
+
+
+source("/Users/don/Documents/bin/sprida-src.R")s
+source("/Users/don/Documents/pathway-mapping/maca-to-ipath/myfunc.R")
+
+
+setwd("/Users/don/Documents/pathway-mapping/maca-to-ipath/")
+
+fn_in <- "drossie_minus_pbqc.csv"
+kegg_species_id <- "dme"
+
+
+#  ==================== ma.ca PW analysis - from run summary with 2 groups ====================
+x <- call_maca_pw_analysis(fn_in, kegg_species_id)
+tbl.out <- x[[1]]
+pw.dict <- x[[2]]
+
+# filter out FDR < 0.01
+my_fdr <- 0.01
+tbl.out2 <- tbl.out %>% filter(FDR < my_fdr)
+significant.pw.names.vec <- as.vector(unlist(tbl.out2[, "map"]))
+
+#  ==================== Get the significant pathways  ==================== 
+# Not willing to put this in a function yet, because it heavily involves string manipulation heuristics
+# Get KEGG name-to-map.id tibble
+kl.dt <- as.data.table(keggList("pathway", kegg_species_id), keep.rownames = T)
+kl.dt[, 2] <- as.vector(unlist(kl.dt[ , lapply(V2, function(x) strsplit(x, " - ")[[1]][1])]))
+kl.dt[, 1] <- as.vector(unlist(kl.dt[ , lapply(V1, function(x) gsub("path:", "", x))]))
+colnames(kl.dt) <- c("pw_id", "pw_name")
+
+# But not all pw names can be found in KEGG
+available.pws.in.kegg <- c()
+for (pw in significant.pw.names.vec) {
+  d_t <- kl.dt %>% filter(pw_name==pw)
+  if (nrow(d_t)==0) {
+    print(paste0(pw, " not found in KEGG!"))
+  } else {
+    available.pws.in.kegg <- c(available.pws.in.kegg, pw)
+  }
+}
+
+significant.pw.ids <- c()
+significant.metabs <- c()
+for (pw in significant.pw.names.vec) {
+  pw_id <- kl.dt[pw_name==pw, pw_id]
+  significant.pw.ids <- c(significant.pw.ids, pw_id)
+  x <- as.vector(unlist(pw.dict[pw_id]))
+  significant.metabs <- c(significant.metabs, x)
+}
+
+# drop duplicates
+significant.metabs <- unique(significant.metabs)
+print(paste0(length(significant.pw.ids), " significant PWs found at FDR < 0.01"))
+print(paste0(length(significant.metabs), " significant unique metabolites found"))
+# get dict of significant pws
+significant.pw.dict <- pw.dict[significant.pw.ids]
+
+# prep selection.str for input into ipath
+selection.str0 <- paste0(lapply(significant.metabs, function(x) paste0(x, " W20 #ff0000")), collapse="\n")
+
+# get shared metabs
+x <- as.vector(unlist(significant.pw.dict))
+common_metabs <- x[duplicated(x)]
+
+
+#  ======================================== POST Calls to iPath API ========================================
+"
+1. Write out whole_module.svg
+2. Get nodes_only as xml, read off significant ellipse coordinates. That's all that's needed. 
+3. From (2), modify (1): turn significant ellipses blue. 
+4. Modify (1): reduce width of highlighted paths, and module ellipse radius. 
+5. For each significant pw, grab edges
+"
+
+## PARAMS
+highlight_path_width <- 10
+module_ellipse_radius <- 5
+
+#palette <- brewer.pal(length(significant.pws), name="Set3")
+url <- "https://pathways.embl.de/mapping.cgi"
+
+# POST request to ipath where `whole_modules`=1
+# This is the main file being modified
+body <- list(selection = selection.str0, 
+             export_type="svg", 
+             default_opacity="0.7",
+             default_width="1",
+             default_radius="5",
+             whole_modules="1")
+print("Making POST request where whole_module == 1...")
+r <- POST(url, body = body, encode = "form")
+print(http_status(r)$message)
+xml_main <- content(r, "text")
+x0_text <- strsplit(xml_main, "\n")[[1]] # to modify
+
+
+## ===== Get coordinates of significant ellipses =====
+# POST request to iPath where `whole_modules`=0
+coords_ls <- get_significant_ellipse_coords(url, selection.str0)
+
+# Change colour of significant ellipses to blue
+for (j in 1:length(x0_text)) {
+  if (grepl("ellipse", x0_text[j])) {
+    attrs_ls <- xml_attrs(read_xml(x0_text[j]))
+    
+    for (i in 1:nrow(coords_ls)) {
+      if (attrs_ls["cx"] == coords_ls[i,1] & attrs_ls["cy"] == coords_ls[i,2]) {
+        x0_text[j] <- gsub("#ff0000", "#00A1E1", x0_text[j])
+      }
+    }
+  }
+}
+
+
+# Set highlighted path width to 7, and red ellipse radius to 5
+for (j in 1:length(x0_text)) {
+  if (grepl("path", x0_text[j]) & grepl("stroke-width='20'", x0_text[j])) {
+    x0_text[j] <- gsub("stroke-width='20'", paste0("stroke-width='", highlight_path_width, "'"), x0_text[j])
+  }
+  if (grepl("ellipse", x0_text[j]) & grepl("fill='#ff0000'", x0_text[j])) {
+    x0_text[j] <- gsub("rx='20'", paste0("rx='", module_ellipse_radius, "'"), x0_text[j])
+    x0_text[j] <- gsub("ry='20'", paste0("ry='", module_ellipse_radius, "'"), x0_text[j])
+  }
+}
+
+
+
+
+# =====For each significant PW =====
+# POST request to ipath where `whole_modules`=1
+# Get dict of colours for each significant pw id
+class.colours <- brewer.pal(length(significant.pw.ids), "Set1")
+names(class.colours) <- significant.pw.ids
+
+for (nm in names(class.colours)) {
+  selection.str <- paste(as.vector(unlist(significant.pw.dict[nm])), collapse=" W20 #ff0000\n")
+  print(paste0(nm, ", ", class.colours[[nm]]))
+  call1 <- list(selection = selection.str, 
+                export_type="svg", 
+                default_opacity="0.7",
+                default_width="1",
+                default_radius="5",
+                whole_modules="1")
+  r <- POST(url, body = call1, encode = "form")
+  xi <- content(r, "text")
+  
+  # Write out to eyeball it
+  fn <- write(xi, paste0("scratch/", nm, ".html"))
+
+}
+
+
+selection.str <- paste(as.vector(unlist(significant.pw.dict[test.pw.id])), collapse=" W20 #ff0000\n")
+call1 <- list(selection = selection.str, 
+              export_type="svg", 
+              default_opacity="0.7",
+              default_width="1",
+              default_radius="5",
+              whole_modules="1")
+r <- POST(url, body = call1, encode = "form")
+xi <- content(r, "text")
+
+
+xi_text <- strsplit(xi, "\n")[[1]]
+d_ls <- c()
+#Get the `d` attribute value of highlighted module <path> tags, i.e. where fill=#ff0000
+for (j in 1:length(xi_text)) {
+  if ((grepl("<path", xi_text[j])==TRUE) & (grepl("stroke='#ff0000'", xi_text[j])==TRUE)) {
+    attrs_ls <- xml_attrs(read_xml(xi_text[j]))
+    d_ls <- c(d_ls, attrs_ls["d"])
+  }
+}
+d_ls <- as.vector(unlist(d_ls))
+# Modify the original svg, overriding colour, according to path
+
+
+for (i in 1:length(x0_text)) {
+  if (grepl("<path", x0_text[i])==TRUE) {
+    for (d.val in d_ls) {
+      if (grepl(d.val, x0_text[i])==TRUE) {
+        x0_text[i] <- gsub("stroke='#ff0000'", paste0("stroke='", test.pw.colour, "'"), x0_text[i])
+      }
+    }
+  }
+}
+
+write(x0_text, "test4.html")
+

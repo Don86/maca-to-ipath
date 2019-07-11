@@ -18,7 +18,7 @@ for (i in 1:nrow(x0.attr.dt)) {
   coords_ls <- rbind(coords_ls, c(x0.attr.dt[i, cx], x0.attr.dt[i, cy]))
 }
 
-# Modify whole_module.svg
+# ==================== Modify whole_module.svg ====================
 x1 <- scan("ipath_whole_module.svg", what="", sep="\n")
 
 for (j in 1:length(x1)) {
