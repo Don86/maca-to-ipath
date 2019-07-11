@@ -2,7 +2,7 @@
 
 Hopefully, all this will one day coalesce in some organized fashion into a more robust piece of software, like a Shiny app. 
 
-* `workbook.R` calls the pathway (enrichment) analysis module in `MetaboAnalystR`, then makes POST requests to iPath to call network `svg` files. `myfunc.R` is a library of functions which are sourced within `workbook.R`. The methodology behind pathway enrichment is the `globaltest` algorithm, which determines whether some pre-specified *group of metabolites* is related to some outcome. It does not matter to the test whether the group of metabolites consists of increased or decreased metabolite intensities (or both), all that matters is the aggregate behaviour of the group. 
+* `workbook.R` calls the pathway (enrichment) analysis module in `MetaboAnalystR`, then makes POST requests to iPath to call network `svg` files. `myfunc.R` is a library of functions which are sourced within `workbook.R`. The methodology behind pathway enrichment is the `globaltest` algorithm, which determines whether some pre-specified *group of metabolites* is related to some outcome. It does not matter to the test whether the group of metabolites consists of increased or decreased metabolite intensities (or both), all that matters is the aggregate behaviour of the group.[1]
 
 * `workbook2.R` (under construction) comprises the traditional method of pathway analysis, i.e.:
 1. For each metabolite, conduct a t-test between pairs of experimental groups to determine statistical significance of change. Each metabolite thus has a p-value associated with it. Adjust this p-value to account for multiple corrections. 
@@ -27,3 +27,7 @@ library("methods")
 library("rvest")
 library("data.table")
 ```
+
+### References
+
+* [1] *A global test for groups of genes: testing association with a clinical outcome*, Goeman et. al., 2004, *Bioinformatics*. 
