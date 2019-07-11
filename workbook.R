@@ -9,7 +9,6 @@ library("rvest")
 library("data.table")
 
 
-#source("/Users/don/Documents/bin/sprida-src.R")
 source("/Users/don/Documents/pathway-mapping/maca-to-ipath/myfunc.R")
 
 
@@ -84,6 +83,7 @@ common_metabs <- x[duplicated(x)]
 
 ## PARAMS
 highlight_path_width <- 10
+highlight_path_opacity <- 0.3
 module_ellipse_radius <- 5
 
 #palette <- brewer.pal(length(significant.pws), name="Set3")
@@ -135,14 +135,15 @@ for (j in 1:length(x0_text)) {
 
 
 
-
 # =====For each significant PW =====
 # POST request to ipath where `whole_modules`=1
 # Get dict of colours for each significant pw id
 class.colours <- brewer.pal(length(significant.pw.ids), "Set1")
 names(class.colours) <- significant.pw.ids
 
-for (nm in names(class.colours)) {
+d.dict <- vector("list",length(class.colours)) # init dictionary of d_ls's, one for each nw
+for (k in 1:length(class.colours)) {
+  nm <- names(class.colours)[k]
   selection.str <- paste(as.vector(unlist(significant.pw.dict[nm])), collapse=" W20 #ff0000\n")
   print(paste0(nm, ", ", class.colours[[nm]]))
   call1 <- list(selection = selection.str, 
@@ -156,7 +157,29 @@ for (nm in names(class.colours)) {
   
   # Write out to eyeball it
   fn <- write(xi, paste0("scratch/", nm, ".html"))
-
+  
+  
+  xi_text <- strsplit(xi, "\n")[[1]]
+  d_ls <- c()
+  #Get the `d` attribute value of highlighted module <path> tags, i.e. where fill=#ff0000
+  for (j in 1:length(xi_text)) {
+    if ((grepl("<path", xi_text[j])==TRUE) & (grepl("stroke='#ff0000'", xi_text[j])==TRUE)) {
+      attrs_ls <- xml_attrs(read_xml(xi_text[j]))
+      d_ls <- c(d_ls, attrs_ls["d"])
+    }
+  }
+  d_ls <- as.vector(unlist(d_ls))
+  # Modify the original svg, overriding colour, according to path
+  
+  for (i in 1:length(x0_text)) {
+    if (grepl("<path", x0_text[i])==TRUE) {
+      for (d.val in d_ls) {
+        if (grepl(d.val, x0_text[i])==TRUE) {
+          x0_text[i] <- gsub("stroke='#ff0000'", paste0("stroke='", class.colours[[nm]], "'"), x0_text[i])
+        }
+      }
+    }
+  }
 }
 
 
